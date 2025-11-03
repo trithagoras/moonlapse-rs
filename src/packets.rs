@@ -6,6 +6,7 @@ pub enum Packet {
     Id(u64),
     Ok,
     Deny,
+    PlayerDisconnected(u64),
     Register(String, String),
     Login(String, String)
 }
