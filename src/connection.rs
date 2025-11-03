@@ -2,7 +2,7 @@ use anyhow::Result;
 use log::{error, info};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt, WriteHalf}, net::{TcpStream}, sync::mpsc};
 
-use crate::{packets::Packet, serializer::{deserialize, serialize}};
+use crate::{deserialize, packets::Packet, serialize};
 
 /// Messages to be sent between the Hub and a Connection
 #[derive(Debug, Clone)]
@@ -37,7 +37,7 @@ impl Connection {
 
     async fn send_packet(writer: &mut WriteHalf<TcpStream>, p: Packet, id: u64) {
         info!("Sending packet {:?} to connection {}", p, id);
-        let res = serialize(&p);
+        let res = serialize!(&p);
         if let Err(ref e) = res {
             error!("Error serializing packet {:?} to send to client: {} - {:?}", &p, id, &e);
         }
@@ -70,7 +70,7 @@ impl Connection {
                     break;
                 }
 
-                match deserialize(&buf[..n]) {
+                match deserialize!(&buf[..n]) {
                     Ok(p) => {
                         if let Err(e) = hub_tx.send(ConnectionMessage::PacketReceived(id, p)) {
                             error!("Failed to send PacketReceived for {}: {}", id, e);
