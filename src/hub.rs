@@ -16,7 +16,6 @@ enum SendTo {
 pub struct HubOptions {
     pub tick_rate: u8,
     pub port: u16,
-    pub max_connections: usize
 }
 
 pub struct Hub {
