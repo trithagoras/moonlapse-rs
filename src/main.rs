@@ -32,6 +32,6 @@ async fn main() {
 
     
 
-    let mut hub = Hub::new(HubOptions{ tick_rate: 20, port: 42523, max_connections: 100 });
+    let mut hub = Hub::new(HubOptions{ tick_rate: 20, port: 42523 });
     hub.start().await;
 }
