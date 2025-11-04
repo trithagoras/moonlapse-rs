@@ -30,8 +30,6 @@ async fn main() {
         .filter_level(LevelFilter::Info)
         .init();
 
-    
-
     let mut hub = Hub::new(HubOptions{ tick_rate: 20, port: 42523 });
     hub.start().await;
 }

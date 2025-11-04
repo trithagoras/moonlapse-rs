@@ -1,6 +1,6 @@
 use anyhow::Result;
-use log::{error, info};
-use tokio::{io::{AsyncReadExt, AsyncWriteExt, WriteHalf}, net::{TcpStream}, sync::mpsc};
+use log::{debug, error, info};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt, WriteHalf}, net::TcpStream, sync::{broadcast, mpsc}};
 
 use crate::{deserialize, packets::Packet, serialize};
 
@@ -27,16 +27,18 @@ pub struct Connection {
     hub_rx: mpsc::UnboundedReceiver<ConnectionMessage>,
     /// messages to send directly to the Hub
     hub_tx: mpsc::UnboundedSender<ConnectionMessage>,
+    /// messages from the Hub that were broadcasted
+    broadcast_rx: broadcast::Receiver<ConnectionMessage>,
     socket: TcpStream
 }
 
 impl Connection {
-    pub fn new(id: u64, hub_rx: mpsc::UnboundedReceiver<ConnectionMessage>, hub_tx: mpsc::UnboundedSender<ConnectionMessage>, socket: TcpStream) -> Connection {
-        Connection { id, hub_rx, hub_tx, socket }
+    pub fn new(id: u64, hub_rx: mpsc::UnboundedReceiver<ConnectionMessage>, hub_tx: mpsc::UnboundedSender<ConnectionMessage>, broadcast_rx: broadcast::Receiver<ConnectionMessage>, socket: TcpStream) -> Connection {
+        Connection { id, hub_rx, hub_tx, broadcast_rx, socket }
     }
 
     async fn send_packet(writer: &mut WriteHalf<TcpStream>, p: Packet, id: u64) {
-        info!("Sending packet {:?} to connection {}", p, id);
+        debug!("Sending packet {:?} to connection {}", p, id);
         let res = serialize!(&p);
         if let Err(ref e) = res {
             error!("Error serializing packet {:?} to send to client: {} - {:?}", &p, id, &e);
@@ -66,7 +68,7 @@ impl Connection {
             loop {
                 let n = reader.read(&mut buf).await?;
                 if n == 0 {
-                    info!("Client {} disconnected", id);
+                    info!("Client ID={} requested disconnection", id);
                     break;
                 }
 
@@ -86,14 +88,21 @@ impl Connection {
         // task to read messages from hub
         let hub_read = async move {
             loop {
-                let msg = self.hub_rx.recv().await;
+                let msg = tokio::select! {
+                    msg = self.hub_rx.recv() => {msg}
+                    msg = self.broadcast_rx.recv() => {
+                        match msg {
+                            Ok(msg) => Some(msg),
+                            _ => None
+                        }
+                    }
+                };
                 match msg {
                     None => {
-                        info!("Hub channel closed for {}", id);
                         break;
                     }
                     Some(ConnectionMessage::Disconnect) => {
-                        info!("Hub requested disconnect for {}", id);
+                        debug!("Hub kicking connection {}", id);
                         break;
                     }
                     Some(ConnectionMessage::SendPacket(p)) => {

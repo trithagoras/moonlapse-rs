@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use anyhow::Result;
-use log::{error, info, warn};
-use tokio::{net::TcpListener, sync::{Mutex, mpsc}, time};
+use log::{debug, error, info, warn};
+use tokio::{net::TcpListener, sync::{Mutex, broadcast, mpsc}, time};
 
 use crate::{connection::{Connection, ConnectionMessage}, packets::Packet};
 
@@ -22,13 +22,15 @@ pub struct Hub {
     opts: HubOptions,
     hub_tx: mpsc::UnboundedSender<ConnectionMessage>,
     hub_rx: mpsc::UnboundedReceiver<ConnectionMessage>,
+    broadcast_tx: broadcast::Sender<ConnectionMessage>,
     connections: Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<ConnectionMessage>>>>
 }
 
 impl Hub {
     pub fn new(opts: HubOptions) -> Hub {
         let (hub_tx, hub_rx) = mpsc::unbounded_channel();
-        Hub { opts, hub_tx, hub_rx, connections: Arc::new(Mutex::new(HashMap::new())) }
+        let (broadcast_tx, _) = broadcast::channel(500);
+        Hub { opts, hub_tx, hub_rx, broadcast_tx, connections: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     pub async fn start(&mut self) {
@@ -37,8 +39,9 @@ impl Hub {
         let connections = self.connections.clone();
         let port = self.opts.port;
         let hub_tx = self.hub_tx.clone();
+        let broadcast_tx = self.broadcast_tx.clone();
         tokio::spawn(async move {
-            Self::listen_loop(port, connections, hub_tx).await?;
+            Self::listen_loop(port, connections, hub_tx, broadcast_tx).await?;
             Ok::<_, anyhow::Error>(())
         });
 
@@ -68,7 +71,7 @@ impl Hub {
         while let Ok(msg) = self.hub_rx.try_recv() {
             match msg {
                 ConnectionMessage::PacketReceived(id, p) => {
-                    info!("Packet received from connection {}: {:?}", id, p);
+                    debug!("Packet received from connection {}: {:?}", id, p);
                     // DEBUG: just sending back an Ok packet
                     self.send_msg(SendTo::Id(id), ConnectionMessage::SendPacket(Packet::Ok)).await;
                 },
@@ -94,7 +97,7 @@ impl Hub {
     }
 
     /// Listens for new connections and dispatches them
-    async fn listen_loop(port: u16, connections: Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<ConnectionMessage>>>>, hub_tx: mpsc::UnboundedSender<ConnectionMessage>) -> Result<()> {
+    async fn listen_loop(port: u16, connections: Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<ConnectionMessage>>>>, hub_tx: mpsc::UnboundedSender<ConnectionMessage>, broadcast_tx: broadcast::Sender<ConnectionMessage>) -> Result<()> {
         let listener = TcpListener::bind(("0.0.0.0", port)).await?;
         info!("Hub listening for connections on port {}", port);
 
@@ -119,14 +122,15 @@ impl Hub {
 
             let conns = connections.clone();
             let hub_tx = hub_tx.clone();
-            let conn = Connection::new(conn_id, conn_rx, hub_tx.clone(), stream);
+            let broadcast_rx = broadcast_tx.subscribe();
+            let conn = Connection::new(conn_id, conn_rx, hub_tx.clone(), broadcast_rx, stream);
             tokio::spawn(async move {
                 conn.start().await?;
                 
                 // connection finished
                 let mut lock = conns.lock().await;
                 lock.remove(&conn_id);
-                info!("Cleaned up after connection {}", conn_id);
+                debug!("Cleaned up after connection {}", conn_id);
                 
                 hub_tx.send(ConnectionMessage::Disconnected(conn_id))?;
                 Ok::<_, anyhow::Error>(())
@@ -151,12 +155,10 @@ impl Hub {
         match to {
             SendTo::Id(id) => self.send_msg_to(id, &msg).await,
             SendTo::All => {
-                let lock = self.connections.lock().await;
-                for (id, tx) in lock.iter() {
-                    if let Err(e) = tx.send(msg.clone()) {
-                        error!("Error sending message {:?} to connection {id}: {e}", msg);
-                    }
-                }
+                match self.broadcast_tx.send(msg.clone()) {
+                    Err(_) => {},   // an error usually indicates that there are no current subscribers.
+                    Ok(n) => debug!("Broadcasted message {:?} to {} connections", msg, n)
+                };
             }
         }
     }
