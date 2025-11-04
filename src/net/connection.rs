@@ -2,18 +2,7 @@ use anyhow::Result;
 use log::{debug, error, info};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt, WriteHalf}, net::TcpStream, sync::{broadcast, mpsc}};
 
-use crate::{deserialize, net::packets::Packet, serialize};
-
-/// Messages to be sent between the Hub and a Connection
-#[derive(Debug, Clone)]
-pub enum ConnectionMessage {
-    /// Signals from Connection to Hub to say "i've disconnected"
-    Disconnected(u64),
-    /// Signals from Connection that a packet has been received
-    PacketReceived(u64, Packet),
-    /// Signals from Hub to send a packet to the client
-    SendPacket(Packet)
-}
+use crate::{deserialize, messages::ConnectionMessage, net::packets::Packet, serialize};
 
 /// Object in charge of communication with a single client.
 /// Handles reading all incoming data, deserialization,
@@ -95,14 +84,10 @@ impl Connection {
                         }
                     }
                 };
-                match msg {
-                    None => {
-                        break;
-                    }
-                    Some(ConnectionMessage::SendPacket(p)) => {
-                        Self::send_packet(&mut writer, p, id).await;
-                    }
-                    _ => {}
+                if let Some(ConnectionMessage::SendPacket(p)) = msg {
+                    Self::send_packet(&mut writer, p, id).await;
+                } else {
+                    break;
                 }
             }
             Ok::<_, anyhow::Error>(())

@@ -2,7 +2,9 @@ use env_logger::Builder;
 use log::LevelFilter;
 use tokio::sync::mpsc;
 
-use crate::{game::{Game, GameOptions, messages::GameMessage}, net::hub::{Hub, HubOptions}};
+mod messages;
+
+use crate::{game::{Game, GameOptions}, messages::HubMessage, net::hub::{Hub, HubOptions}};
 
 mod net;
 mod game;
@@ -11,14 +13,14 @@ mod game;
 #[macro_export]
 macro_rules! serialize {
     ($expression:expr) => {
-        crate::net::serializers::msgpack::serialize($expression)
+        crate::net::serializers::json::serialize($expression)
     };
 }
 
 #[macro_export]
 macro_rules! deserialize {
     ($expression:expr) => {
-        crate::net::serializers::msgpack::deserialize($expression)
+        crate::net::serializers::json::deserialize($expression)
     };
 }
 
@@ -29,8 +31,8 @@ async fn main() {
         .filter_level(LevelFilter::Info)
         .init();
 
-    let (hub_to_game_tx, hub_to_game_rx) = mpsc::unbounded_channel::<GameMessage>();
-    let (game_to_hub_tx, game_to_hub_rx) = mpsc::unbounded_channel::<GameMessage>();
+    let (hub_to_game_tx, hub_to_game_rx) = mpsc::unbounded_channel::<HubMessage>();
+    let (game_to_hub_tx, game_to_hub_rx) = mpsc::unbounded_channel::<HubMessage>();
 
     // spawn game task
     let mut game = Game::new(GameOptions{tick_rate: 20}, game_to_hub_tx.clone(), hub_to_game_rx);

@@ -1,13 +1,13 @@
-pub mod messages;
 pub mod components;
+pub mod systems;
 
 use std::{collections::HashMap, time::Duration};
 
 use hecs::{Entity, World};
-use log::warn;
+use log::{info, warn};
 use tokio::{sync::mpsc, time};
 
-use crate::{game::{components::{Movable, Player, Position}, messages::GameMessage}, net::packets::{Component, Direction, Packet}};
+use crate::{game::{components::{Player, Position, Velocity}, systems::{movement_system, set_entity_velocity}}, messages::HubMessage, net::packets::{Component, Packet}};
 
 pub struct GameOptions {
     pub tick_rate: u8
@@ -15,18 +15,15 @@ pub struct GameOptions {
 
 pub struct Game {
     opts: GameOptions,
-    hub_tx: mpsc::UnboundedSender<GameMessage>,
-    hub_rx: mpsc::UnboundedReceiver<GameMessage>,
+    hub_tx: mpsc::UnboundedSender<HubMessage>,
+    hub_rx: mpsc::UnboundedReceiver<HubMessage>,
     world: World,
     /// Mapping of player connection_id -> in-game Entity
     conn_entity_map: HashMap<u64, Entity>
 }
 
 impl Game {
-    pub fn new(opts: GameOptions, hub_tx: mpsc::UnboundedSender<GameMessage>, hub_rx: mpsc::UnboundedReceiver<GameMessage>) -> Game {
-
-        // register all systems
-
+    pub fn new(opts: GameOptions, hub_tx: mpsc::UnboundedSender<HubMessage>, hub_rx: mpsc::UnboundedReceiver<HubMessage>) -> Game {
         Game{opts, hub_tx, hub_rx, world: World::new(), conn_entity_map: HashMap::new()}
     }
 
@@ -39,7 +36,7 @@ impl Game {
             let start_time = time::Instant::now();
 
             // tick!
-            self.tick(&ticks).await;
+            self.tick(&ticks);
 
             let elapsed_ms = start_time.elapsed().as_millis() as u64;
             
@@ -53,65 +50,54 @@ impl Game {
         }
     }
 
-    async fn tick(&mut self, ticks: &u64) {
-        // read all incoming messages from hub
-        while let Some(msg) = self.hub_rx.recv().await {
-            match msg {
-                GameMessage::PacketFromClient(conn_id, packet) => {
-                    match packet {
-                        Packet::Translate(dir) => {
-                            let (dx, dy) = match dir {
-                                Direction::Up => (0, 1),
-                                Direction::Down => (0, -1),
-                                Direction::Right => (1, 0),
-                                Direction::Left => (-1, 0)
-                            };
-                            self.translate_player(conn_id, dx, dy);
-                        },
-                        _ => {}
-                    }
-                },
-                GameMessage::ClientDisconnected(conn_id) => {
-                    // TODO: clean up actual entity stuff
-                    if let Some(entity) = self.conn_entity_map.remove(&conn_id) {
-                        _ = self.world.despawn(entity);
-                    }
-                },
-                GameMessage::ClientConnected(conn_id) => {
-                    let bundle = (Player{id: conn_id}, Movable{}, Position{x: 0, y: 0});
-                    let entity = self.world.spawn(bundle);
-                    self.conn_entity_map.insert(conn_id, entity);
-                    
-                    // TODO: make this nicer!
-                    let _ = self.hub_tx.send(GameMessage::Broadcast(
-                        Packet::ComponentUpdate(entity.id(), Component::Position(Position{x: 0, y: 0}))
-                    ));
-                    let _ = self.hub_tx.send(GameMessage::Broadcast(
-                        Packet::ComponentUpdate(entity.id(), Component::Player(Player{id: conn_id}))
-                    ));
-
-                }
-                _ => warn!("Unhandled message")
-            }
+    fn tick(&mut self, _ticks: &u64) {
+        // dispatch all incoming messages from hub
+        while let Ok(msg) = self.hub_rx.try_recv() {
+            self.dispatch_hub_message(msg);
         }
+
+        self.run_systems();
     }
 
-    fn translate_player(&mut self, conn_id: u64, dx: i8, dy: i8) {
-        if let Some(&entity) = self.conn_entity_map.get(&conn_id) {
-            if self.world.get::<&Movable>(entity).is_ok() {
-                if let Ok(mut pos) = self.world.get::<&mut Position>(entity) {
-                    pos.x += dx as i32;
-                    pos.y += dy as i32;
+    fn run_systems(&mut self) {
+        movement_system(&mut self.world, &self.hub_tx);
+    }
 
-                    let _ = self.hub_tx.send(GameMessage::Broadcast(
-                        Packet::ComponentUpdate(entity.id(), Component::Position(Position{x: pos.x, y: pos.y})),
-                    ));
+    fn dispatch_hub_message(&mut self, msg: HubMessage) {
+        match msg {
+            HubMessage::PacketFromClient(conn_id, packet) => {
+                match packet {
+                    Packet::Translate(dir) => {
+                        if let Some(entity) = self.conn_entity_map.get(&conn_id) {
+                            set_entity_velocity(&mut self.world, &entity, dir);
+                        }
+                    },
+                    _ => {}
                 }
-            } else {
-                warn!("Entity for conn_id {} is not movable", conn_id);
+            },
+            HubMessage::ClientDisconnected(conn_id) => {
+                // TODO: clean up actual entity stuff
+                if let Some(entity) = self.conn_entity_map.remove(&conn_id) {
+                    _ = self.world.despawn(entity);
+                }
+            },
+            HubMessage::ClientConnected(conn_id) => {
+                let bundle = (Player{id: conn_id}, Velocity{dx: 0, dy: 0}, Position{x: 0, y: 0});
+                let entity = self.world.spawn(bundle);
+                self.conn_entity_map.insert(conn_id, entity);
+                
+                // TODO: make this nicer!
+                // e.g. ComponentUpdate((c1, c2, ...))
+                // no need to send Velocity to client
+                let _ = self.hub_tx.send(HubMessage::Broadcast(
+                    Packet::ComponentUpdate(entity.id(), Component::Position(Position{x: 0, y: 0}))
+                ));
+                let _ = self.hub_tx.send(HubMessage::Broadcast(
+                    Packet::ComponentUpdate(entity.id(), Component::Player(Player{id: conn_id}))
+                ));
+
             }
-        } else {
-            warn!("Unknown connection id {}", conn_id);
+            _ => warn!("Unhandled message")
         }
     }
 }

@@ -7,5 +7,5 @@ pub struct Player { pub id: u64 }
 pub struct Position { pub x: i32, pub y: i32 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-/// Whether the entity is allowed to move
-pub struct Movable {}
+/// Used in conjunction with the Position component in the MovementSystem
+pub struct Velocity { pub dx: i32, pub dy: i32 }
