@@ -101,6 +101,8 @@ impl Hub {
     /// Listens for new connections and dispatches them
     async fn listen_loop(port: u16, connections: Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<ConnectionMessage>>>>, hub_tx: mpsc::UnboundedSender<ConnectionMessage>, broadcast_tx: broadcast::Sender<ConnectionMessage>, game_tx: mpsc::UnboundedSender<HubMessage>) -> Result<()> {
         let listener = TcpListener::bind(("0.0.0.0", port)).await?;
+        let port = listener.local_addr()?.port();
+        
         info!("Hub listening for connections on port {}", port);
 
         let mut conn_id = 0u64;

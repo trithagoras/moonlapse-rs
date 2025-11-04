@@ -1,3 +1,5 @@
+use std::env;
+
 use env_logger::Builder;
 use log::LevelFilter;
 use tokio::sync::mpsc;
@@ -26,6 +28,15 @@ macro_rules! deserialize {
 
 #[tokio::main]
 async fn main() {
+    let mut port = 42523u16;
+
+    let args: Vec<String> = env::args().collect();
+    if let [_, port_str] = &args[..] {
+        if let Ok(p) = port_str.parse::<u16>() {
+            port = p;
+        }
+    }
+
     // setup logger
     Builder::new()
         .filter_level(LevelFilter::Info)
@@ -38,6 +49,6 @@ async fn main() {
     let mut game = Game::new(GameOptions{tick_rate: 20}, game_to_hub_tx.clone(), hub_to_game_rx);
     tokio::spawn(async move { game.start().await; });
 
-    let mut hub = Hub::new(HubOptions{ port: 42523 }, hub_to_game_tx, game_to_hub_rx);
+    let mut hub = Hub::new(HubOptions{ port }, hub_to_game_tx, game_to_hub_rx);
     hub.start().await;
 }
