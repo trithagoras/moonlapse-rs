@@ -1,10 +1,10 @@
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Result;
-use log::{debug, error, info, warn};
-use tokio::{net::TcpListener, sync::{Mutex, broadcast, mpsc}, time};
+use log::{debug, error, info};
+use tokio::{net::TcpListener, sync::{Mutex, broadcast, mpsc}};
 
-use crate::{connection::{Connection, ConnectionMessage}, packets::Packet};
+use crate::{game::messages::GameMessage, net::{connection::{Connection, ConnectionMessage}, packets::Packet}};
 
 
 #[derive(Debug)]
@@ -14,7 +14,6 @@ enum SendTo {
 }
 
 pub struct HubOptions {
-    pub tick_rate: u8,
     pub port: u16,
 }
 
@@ -22,15 +21,17 @@ pub struct Hub {
     opts: HubOptions,
     hub_tx: mpsc::UnboundedSender<ConnectionMessage>,
     hub_rx: mpsc::UnboundedReceiver<ConnectionMessage>,
+    game_tx: mpsc::UnboundedSender<GameMessage>,
+    game_rx: mpsc::UnboundedReceiver<GameMessage>,
     broadcast_tx: broadcast::Sender<ConnectionMessage>,
     connections: Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<ConnectionMessage>>>>
 }
 
 impl Hub {
-    pub fn new(opts: HubOptions) -> Hub {
+    pub fn new(opts: HubOptions, game_tx: mpsc::UnboundedSender<GameMessage>, game_rx: mpsc::UnboundedReceiver<GameMessage>) -> Hub {
         let (hub_tx, hub_rx) = mpsc::unbounded_channel();
         let (broadcast_tx, _) = broadcast::channel(500);
-        Hub { opts, hub_tx, hub_rx, broadcast_tx, connections: Arc::new(Mutex::new(HashMap::new())) }
+        Hub { opts, hub_tx, hub_rx, broadcast_tx, connections: Arc::new(Mutex::new(HashMap::new())), game_tx, game_rx }
     }
 
     pub async fn start(&mut self) {
@@ -45,54 +46,52 @@ impl Hub {
             Ok::<_, anyhow::Error>(())
         });
 
-        // start tick loop
-        let mut ticks = 0u64;
-        let ideal_tick_duration = 1000 / self.opts.tick_rate as u64;
+        // event reactive router
+        let game_tx = self.game_tx.clone();
         loop {
-            let start_time = time::Instant::now();
+            tokio::select! {
+                Some(msg) = self.hub_rx.recv() => {
+                    self.handle_connection_message(msg, game_tx.clone()).await;
+                }
 
-            // tick!
-            self.tick(&ticks).await;
+                Some(msg) = self.game_rx.recv() => {
+                    self.handle_game_message(msg).await;
+                }
 
-            let elapsed_ms = start_time.elapsed().as_millis() as u64;
-            
-            if elapsed_ms >= ideal_tick_duration {
-                warn!("Tick time budget exceeded. Goal time: {} ms, actual time: {} ms", ideal_tick_duration, elapsed_ms);
-            } else {
-                let remaining_sleep_time = ideal_tick_duration - elapsed_ms;
-                time::sleep(Duration::from_millis(remaining_sleep_time)).await;
+                else => break, // all senders dropped
             }
-            ticks += 1;
         }
     }
 
-    pub async fn tick(&mut self, ticks: &u64) {
-        // dispatch incoming messages from all connections
-        while let Ok(msg) = self.hub_rx.try_recv() {
-            match msg {
-                ConnectionMessage::PacketReceived(id, p) => {
-                    debug!("Packet received from connection {}: {:?}", id, p);
-                    // DEBUG: just sending back an Ok packet
-                    self.send_msg(SendTo::Id(id), ConnectionMessage::SendPacket(Packet::Ok)).await;
-                },
-                ConnectionMessage::Disconnected(id) => {
-                    // broadcast to everyone
-                    self.send_msg(SendTo::All, ConnectionMessage::SendPacket(Packet::PlayerDisconnected(id))).await
+    async fn handle_connection_message(&self, msg: ConnectionMessage, game_tx: mpsc::UnboundedSender<GameMessage>) {
+        match msg {
+            ConnectionMessage::PacketReceived(id, packet) => match packet {
+                Packet::Chat(s) => {
+                    // broadcast the received chat to all connections
+                    self.send_msg(SendTo::All, ConnectionMessage::SendPacket(Packet::ChatBroadcast(id, s))).await;
                 }
-                _ => {}
+                p => {
+                    // just forward all other packets directly to the game to handle
+                    let _ = game_tx.send(GameMessage::PacketFromClient(id, p));
+                }
+            },
+            ConnectionMessage::Disconnected(id) => {
+                // forward to game to clean up. Nothing else required here since other cleanup is handled already.
+                let _ = game_tx.send(GameMessage::ClientDisconnected(id));
             }
+            _ => {}
         }
+    }
 
-        // DEBUG:
-        // send an Ok packet every second
-        if *ticks % 20 == 0 {
-            self.send_msg(SendTo::All, ConnectionMessage::SendPacket(Packet::Ok)).await;
-        }
-
-        // DEBUG:
-        // disconnect everyone after 15 seconds
-        if *ticks % 300 == 0 {
-            self.send_msg(SendTo::All, ConnectionMessage::Disconnect).await;
+    async fn handle_game_message(&self, msg: GameMessage) {
+        match msg {
+            GameMessage::SendTo(id, pkt) => {
+                self.send_msg(SendTo::Id(id), ConnectionMessage::SendPacket(pkt)).await;
+            }
+            GameMessage::Broadcast(pkt) => {
+                self.send_msg(SendTo::All, ConnectionMessage::SendPacket(pkt)).await;
+            }
+            _ => {}
         }
     }
 

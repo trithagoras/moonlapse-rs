@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::packets::Packet;
+use crate::net::packets::Packet;
 
 pub fn serialize(p: &Packet) -> Result<Vec<u8>> {
     let data = rmp_serde::to_vec(&p)?;

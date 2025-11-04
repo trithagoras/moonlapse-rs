@@ -2,7 +2,7 @@ use flexbuffers::{FlexbufferSerializer, Reader};
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
 
-use crate::packets::Packet;
+use crate::net::packets::Packet;
 
 pub fn serialize(p: &Packet) -> Result<Vec<u8>> {
     let mut s = FlexbufferSerializer::new();

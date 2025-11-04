@@ -2,13 +2,13 @@ use anyhow::Result;
 use log::{debug, error, info};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt, WriteHalf}, net::TcpStream, sync::{broadcast, mpsc}};
 
-use crate::{deserialize, packets::Packet, serialize};
+use crate::{deserialize, net::packets::Packet, serialize};
 
 /// Messages to be sent between the Hub and a Connection
 #[derive(Debug, Clone)]
 pub enum ConnectionMessage {
     /// Signals from Hub to drop the connection
-    Disconnect,
+    Kick,
     /// Signals from Connection to Hub to say "i've disconnected"
     Disconnected(u64),
     /// Signals from Connection that a packet has been received
@@ -101,7 +101,7 @@ impl Connection {
                     None => {
                         break;
                     }
-                    Some(ConnectionMessage::Disconnect) => {
+                    Some(ConnectionMessage::Kick) => {
                         debug!("Hub kicking connection {}", id);
                         break;
                     }

@@ -1,25 +1,24 @@
 use env_logger::Builder;
 use log::LevelFilter;
+use tokio::sync::mpsc;
 
-use crate::hub::{Hub, HubOptions};
+use crate::{game::{Game, GameOptions, messages::GameMessage}, net::hub::{Hub, HubOptions}};
 
-mod packets;
-mod hub;
-mod serializers;
-mod connection;
+mod net;
+mod game;
 
 // can easily swap out serializers
 #[macro_export]
 macro_rules! serialize {
     ($expression:expr) => {
-        crate::serializers::msgpack::serialize($expression)
+        crate::net::serializers::msgpack::serialize($expression)
     };
 }
 
 #[macro_export]
 macro_rules! deserialize {
     ($expression:expr) => {
-        crate::serializers::msgpack::deserialize($expression)
+        crate::net::serializers::msgpack::deserialize($expression)
     };
 }
 
@@ -30,6 +29,13 @@ async fn main() {
         .filter_level(LevelFilter::Info)
         .init();
 
-    let mut hub = Hub::new(HubOptions{ tick_rate: 20, port: 42523 });
+    let (hub_to_game_tx, hub_to_game_rx) = mpsc::unbounded_channel::<GameMessage>();
+    let (game_to_hub_tx, game_to_hub_rx) = mpsc::unbounded_channel::<GameMessage>();
+
+    // spawn game task
+    let mut game = Game::new(GameOptions{tick_rate: 20}, game_to_hub_tx.clone(), hub_to_game_rx);
+    tokio::spawn(async move { game.start().await; });
+
+    let mut hub = Hub::new(HubOptions{ port: 42523 }, hub_to_game_tx, game_to_hub_rx);
     hub.start().await;
 }
