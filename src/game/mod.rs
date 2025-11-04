@@ -1,11 +1,11 @@
 pub mod messages;
 pub mod components;
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use hecs::{Entity, World};
-use log::{info, warn};
-use tokio::{sync::{Mutex, mpsc}, time};
+use log::warn;
+use tokio::{sync::mpsc, time};
 
 use crate::{game::{components::{Movable, Player, Position}, messages::GameMessage}, net::packets::{Component, Direction, Packet}};
 

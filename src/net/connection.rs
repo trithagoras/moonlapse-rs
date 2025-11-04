@@ -7,8 +7,6 @@ use crate::{deserialize, net::packets::Packet, serialize};
 /// Messages to be sent between the Hub and a Connection
 #[derive(Debug, Clone)]
 pub enum ConnectionMessage {
-    /// Signals from Hub to drop the connection
-    Kick,
     /// Signals from Connection to Hub to say "i've disconnected"
     Disconnected(u64),
     /// Signals from Connection that a packet has been received
@@ -99,10 +97,6 @@ impl Connection {
                 };
                 match msg {
                     None => {
-                        break;
-                    }
-                    Some(ConnectionMessage::Kick) => {
-                        debug!("Hub kicking connection {}", id);
                         break;
                     }
                     Some(ConnectionMessage::SendPacket(p)) => {

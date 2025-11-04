@@ -41,17 +41,17 @@ impl Hub {
         let port = self.opts.port;
         let hub_tx = self.hub_tx.clone();
         let broadcast_tx = self.broadcast_tx.clone();
+        let game_tx = self.game_tx.clone();
         tokio::spawn(async move {
-            Self::listen_loop(port, connections, hub_tx, broadcast_tx).await?;
+            Self::listen_loop(port, connections, hub_tx, broadcast_tx, game_tx).await?;
             Ok::<_, anyhow::Error>(())
         });
 
         // event reactive router
-        let game_tx = self.game_tx.clone();
         loop {
             tokio::select! {
                 Some(msg) = self.hub_rx.recv() => {
-                    self.handle_connection_message(msg, game_tx.clone()).await;
+                    self.handle_connection_message(msg).await;
                 }
 
                 Some(msg) = self.game_rx.recv() => {
@@ -63,7 +63,7 @@ impl Hub {
         }
     }
 
-    async fn handle_connection_message(&self, msg: ConnectionMessage, game_tx: mpsc::UnboundedSender<GameMessage>) {
+    async fn handle_connection_message(&self, msg: ConnectionMessage) {
         match msg {
             ConnectionMessage::PacketReceived(id, packet) => match packet {
                 Packet::Chat(s) => {
@@ -72,12 +72,14 @@ impl Hub {
                 }
                 p => {
                     // just forward all other packets directly to the game to handle
-                    let _ = game_tx.send(GameMessage::PacketFromClient(id, p));
+                    let _ = self.game_tx.send(GameMessage::PacketFromClient(id, p));
                 }
             },
             ConnectionMessage::Disconnected(id) => {
                 // forward to game to clean up. Nothing else required here since other cleanup is handled already.
-                let _ = game_tx.send(GameMessage::ClientDisconnected(id));
+                let _ = self.game_tx.send(GameMessage::ClientDisconnected(id));
+                // broadcast a disconnected packet to all other players
+                self.send_msg(SendTo::All, ConnectionMessage::SendPacket(Packet::PlayerDisconnected(id))).await;
             }
             _ => {}
         }
@@ -96,7 +98,7 @@ impl Hub {
     }
 
     /// Listens for new connections and dispatches them
-    async fn listen_loop(port: u16, connections: Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<ConnectionMessage>>>>, hub_tx: mpsc::UnboundedSender<ConnectionMessage>, broadcast_tx: broadcast::Sender<ConnectionMessage>) -> Result<()> {
+    async fn listen_loop(port: u16, connections: Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<ConnectionMessage>>>>, hub_tx: mpsc::UnboundedSender<ConnectionMessage>, broadcast_tx: broadcast::Sender<ConnectionMessage>, game_tx: mpsc::UnboundedSender<GameMessage>) -> Result<()> {
         let listener = TcpListener::bind(("0.0.0.0", port)).await?;
         info!("Hub listening for connections on port {}", port);
 
@@ -118,6 +120,9 @@ impl Hub {
                 let mut lock = connections.lock().await;
                 lock.insert(conn_id, conn_tx);
             }
+
+            // send connection message to game
+            _ = game_tx.send(GameMessage::ClientConnected(conn_id));
 
             let conns = connections.clone();
             let hub_tx = hub_tx.clone();
