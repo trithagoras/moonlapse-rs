@@ -1,4 +1,4 @@
-use crate::net::packets::{Direction, Packet};
+use crate::net::packets::{Packet};
 
 /// Messages to be sent between the Hub and a Connection
 #[derive(Debug, Clone)]
@@ -22,14 +22,3 @@ pub enum HubMessage {
     SendTo(u64, Packet),
     Broadcast(Packet)
 }
-
-
-#[derive(Debug, Clone)]
-/// Messages to be sent within the Game layer only.
-/// Doesn't deal with anything related to connections. Only entities.
-pub enum GameEvent {
-    EntityDespawned(u32),
-    EntitySpawned(u32),
-    Translate(Direction)
-}
-

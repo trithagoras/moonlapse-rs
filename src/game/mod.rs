@@ -5,9 +5,17 @@ use std::{collections::HashMap, time::Duration};
 
 use hecs::{Entity, World};
 use log::{info, warn};
+use serde::{Deserialize, Serialize};
 use tokio::{sync::mpsc, time};
 
 use crate::{game::{components::{Player, Position, Velocity}, systems::{movement_system, set_entity_velocity}}, messages::HubMessage, net::packets::{Component, Packet}};
+
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct WorldSnapshot {
+    pub players: Vec<(u32, Player)>,
+    pub positions: Vec<(u32, Position)>,
+}
 
 pub struct GameOptions {
     pub tick_rate: u8
@@ -85,10 +93,17 @@ impl Game {
                 let bundle = (Player{id: conn_id}, Velocity{dx: 0, dy: 0}, Position{x: 0, y: 0});
                 let entity = self.world.spawn(bundle);
                 self.conn_entity_map.insert(conn_id, entity);
+
+                // TODO: broadcasts and regular sends are sent in indeterminable order due to select! in Connection
+                // that's probably bad....
+
+                // send a current world snapshot to the new connection
+                let snapshot = Self::create_world_snapshot(&self.world);
+                let _ = self.hub_tx.send(HubMessage::SendTo(conn_id, Packet::WorldSnapshot(snapshot)));
                 
+                // broadcast our new connection to everyone else
                 // TODO: make this nicer!
                 // e.g. ComponentUpdate((c1, c2, ...))
-                // no need to send Velocity to client
                 let _ = self.hub_tx.send(HubMessage::Broadcast(
                     Packet::ComponentUpdate(entity.id(), Component::Position(Position{x: 0, y: 0}))
                 ));
@@ -99,5 +114,21 @@ impl Game {
             }
             _ => warn!("Unhandled message")
         }
+    }
+
+    /// Creates a snapshot of the world to be sent to new connections.
+    fn create_world_snapshot(world: &World) -> WorldSnapshot {
+        let mut players = Vec::new();
+        let mut positions = Vec::new();
+
+        for (entity, player) in world.query::<&Player>().iter() {
+            players.push((entity.id(), player.clone()));
+        }
+
+        for (entity, pos) in world.query::<&Position>().iter() {
+            positions.push((entity.id(), pos.clone()));
+        }
+
+        WorldSnapshot { players, positions }
     }
 }

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::game::components::{Player, Position};
+use crate::game::{WorldSnapshot, components::{Player, Position}};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Direction {
@@ -31,5 +31,6 @@ pub enum Packet {
     ChatBroadcast(u64, String),
     /// Client wants to move in a direction
     Translate(Direction),
-    ComponentUpdate(u32, Component)
+    ComponentUpdate(u32, Component),
+    WorldSnapshot(WorldSnapshot)
 }
