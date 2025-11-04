@@ -13,14 +13,14 @@ mod game;
 #[macro_export]
 macro_rules! serialize {
     ($expression:expr) => {
-        crate::net::serializers::json::serialize($expression)
+        moonlapse_shared::serializers::json::serialize($expression)
     };
 }
 
 #[macro_export]
 macro_rules! deserialize {
     ($expression:expr) => {
-        crate::net::serializers::json::deserialize($expression)
+        moonlapse_shared::serializers::json::deserialize($expression)
     };
 }
 

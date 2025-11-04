@@ -273,7 +273,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "moonlapse-server"
+name = "moonlapse"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -281,22 +281,10 @@ dependencies = [
  "flexbuffers",
  "hecs",
  "log",
- "moonlapse-shared",
  "rmp-serde",
  "serde",
  "serde_json",
  "tokio",
-]
-
-[[package]]
-name = "moonlapse-shared"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "flexbuffers",
- "rmp-serde",
- "serde",
- "serde_json",
 ]
 
 [[package]]

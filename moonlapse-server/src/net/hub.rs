@@ -4,7 +4,8 @@ use anyhow::Result;
 use log::{debug, error, info};
 use tokio::{net::TcpListener, sync::{Mutex, broadcast, mpsc}};
 
-use crate::{messages::{ConnectionMessage, HubMessage}, net::{connection::Connection, packets::Packet}};
+use crate::{messages::{ConnectionMessage, HubMessage}, net::{connection::Connection}};
+use moonlapse_shared::packets::Packet;
 
 
 #[derive(Debug)]

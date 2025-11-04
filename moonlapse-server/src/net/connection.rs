@@ -2,7 +2,8 @@ use anyhow::Result;
 use log::{debug, error, info};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt, WriteHalf}, net::TcpStream, sync::{broadcast, mpsc}};
 
-use crate::{deserialize, messages::ConnectionMessage, net::packets::Packet, serialize};
+use crate::{deserialize, messages::ConnectionMessage, serialize};
+use moonlapse_shared::packets::Packet;
 
 /// Object in charge of communication with a single client.
 /// Handles reading all incoming data, deserialization,

@@ -1,4 +1,4 @@
-use crate::net::packets::{Packet};
+use moonlapse_shared::packets::{Packet};
 
 /// Messages to be sent between the Hub and a Connection
 #[derive(Debug, Clone)]

@@ -1,8 +1,9 @@
 use hecs::{Entity, World};
 use log::{warn};
+use moonlapse_shared::{components::*, packets::{Component, Direction, Packet}};
 use tokio::sync::mpsc;
 
-use crate::{game::components::{Position, Velocity}, messages::HubMessage, net::packets::{Component, Direction, Packet}};
+use crate::{messages::HubMessage};
 
 pub fn movement_system(world: &mut World, hub_tx: &mpsc::UnboundedSender<HubMessage>) {
     // for all entities with Position + Velocity

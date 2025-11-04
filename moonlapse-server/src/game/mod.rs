@@ -1,21 +1,13 @@
-pub mod components;
 pub mod systems;
 
 use std::{collections::HashMap, time::Duration};
 
 use hecs::{Entity, World};
-use log::{info, warn};
-use serde::{Deserialize, Serialize};
+use log::{warn};
+use moonlapse_shared::{WorldSnapshot, components::{Player, Position, Velocity}, packets::{Component, Packet}};
 use tokio::{sync::mpsc, time};
 
-use crate::{game::{components::{Player, Position, Velocity}, systems::{movement_system, set_entity_velocity}}, messages::HubMessage, net::packets::{Component, Packet}};
-
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct WorldSnapshot {
-    pub players: Vec<(u32, Player)>,
-    pub positions: Vec<(u32, Position)>,
-}
+use crate::{game::systems::{movement_system, set_entity_velocity}, messages::HubMessage};
 
 pub struct GameOptions {
     pub tick_rate: u8
