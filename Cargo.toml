@@ -2,6 +2,6 @@
 members = [
     "moonlapse-shared",
     "moonlapse-server",
-    #"moonlapse-client"
+    "moonlapse-client",
 ]
 resolver = "3"
