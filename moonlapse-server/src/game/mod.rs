@@ -4,7 +4,7 @@ use std::{collections::HashMap, time::Duration};
 
 use hecs::{Entity, World};
 use log::{warn};
-use moonlapse_shared::{WorldSnapshot, components::{Player, Position, Velocity}, packets::{Component, Packet}};
+use moonlapse_shared::{ConnId, WorldSnapshot, components::{EntityDetails, Player, Position, Velocity}, packets::{Component, Packet}};
 use tokio::{sync::mpsc, time};
 
 use crate::{game::systems::{movement_system, set_entity_velocity}, messages::HubMessage};
@@ -19,7 +19,7 @@ pub struct Game {
     hub_rx: mpsc::UnboundedReceiver<HubMessage>,
     world: World,
     /// Mapping of player connection_id -> in-game Entity
-    conn_entity_map: HashMap<u64, Entity>
+    conn_entity_map: HashMap<ConnId, Entity>
 }
 
 impl Game {
@@ -75,14 +75,13 @@ impl Game {
                     _ => {}
                 }
             },
-            HubMessage::ClientDisconnected(conn_id) => {
-                // TODO: clean up actual entity stuff
+            HubMessage::PlayerLeft(conn_id) => {
                 if let Some(entity) = self.conn_entity_map.remove(&conn_id) {
                     _ = self.world.despawn(entity);
                 }
             },
-            HubMessage::ClientConnected(conn_id) => {
-                let bundle = (Player{id: conn_id}, Velocity{dx: 0, dy: 0}, Position{x: 0, y: 0});
+            HubMessage::PlayerJoined(conn_id, username) => {
+                let bundle = (Player{id: conn_id}, Velocity{dx: 0, dy: 0}, Position{x: 0, y: 0}, EntityDetails{name: username, description: "Another moonlapser".into()});
                 let entity = self.world.spawn(bundle);
                 self.conn_entity_map.insert(conn_id, entity);
 

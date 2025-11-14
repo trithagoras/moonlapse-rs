@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{WorldSnapshot, components::{Player, Position}};
+use crate::{ConnId, EntityId, WorldSnapshot, components::{Player, Position}};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Direction {
@@ -18,19 +18,20 @@ pub enum Component {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Packet {
-    Id(u64),
+    Id(ConnId),
     Ok,
-    Deny,
+    /// Deny with a reason. Usually used in form validation, e.g. login/registration form.
+    Deny(String),
     /// Telling a client about who has disconnected
-    PlayerDisconnected(u64),
+    PlayerDisconnected(ConnId),
     Register(String, String),
     Login(String, String),
     /// A chat from the client to the server
     Chat(String),
     /// Denotes a chat from another player (id)
-    ChatBroadcast(u64, String),
+    ChatBroadcast(ConnId, String),
     /// Client wants to move in a direction
     Translate(Direction),
-    ComponentUpdate(u32, Component),
+    ComponentUpdate(EntityId, Component),
     WorldSnapshot(WorldSnapshot)
 }

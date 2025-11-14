@@ -6,8 +6,11 @@ pub mod components;
 pub mod serializers;
 pub mod packets;
 
+pub type ConnId = u64;
+pub type EntityId = u32;
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct WorldSnapshot {
-    pub players: Vec<(u32, Player)>,
-    pub positions: Vec<(u32, Position)>,
+    pub players: Vec<(EntityId, Player)>,
+    pub positions: Vec<(EntityId, Position)>,
 }

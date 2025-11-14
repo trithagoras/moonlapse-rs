@@ -3,29 +3,29 @@ use log::{debug, error, info};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt, WriteHalf}, net::TcpStream, sync::{broadcast, mpsc}};
 
 use crate::{deserialize, messages::ConnectionMessage, serialize};
-use moonlapse_shared::packets::Packet;
+use moonlapse_shared::{ConnId, packets::Packet};
 
 /// Object in charge of communication with a single client.
 /// Handles reading all incoming data, deserialization,
 /// sending incoming packets back to the hub, and
 /// sending any packets from the outbox back to the client.
 pub struct Connection {
-    id: u64,
+    id: ConnId,
     /// messages coming directly from the Hub
     hub_rx: mpsc::UnboundedReceiver<ConnectionMessage>,
     /// messages to send directly to the Hub
     hub_tx: mpsc::UnboundedSender<ConnectionMessage>,
     /// messages from the Hub that were broadcasted
     broadcast_rx: broadcast::Receiver<ConnectionMessage>,
-    socket: TcpStream
+    socket: TcpStream,
 }
 
 impl Connection {
-    pub fn new(id: u64, hub_rx: mpsc::UnboundedReceiver<ConnectionMessage>, hub_tx: mpsc::UnboundedSender<ConnectionMessage>, broadcast_rx: broadcast::Receiver<ConnectionMessage>, socket: TcpStream) -> Connection {
-        Connection { id, hub_rx, hub_tx, broadcast_rx, socket }
+    pub fn new(id: ConnId, hub_rx: mpsc::UnboundedReceiver<ConnectionMessage>, hub_tx: mpsc::UnboundedSender<ConnectionMessage>, broadcast_rx: broadcast::Receiver<ConnectionMessage>, socket: TcpStream) -> Connection {
+        Connection { id, hub_rx, hub_tx, broadcast_rx, socket}
     }
 
-    async fn send_packet(writer: &mut WriteHalf<TcpStream>, p: Packet, id: u64) {
+    async fn send_packet(writer: &mut WriteHalf<TcpStream>, p: Packet, id: ConnId) {
         debug!("Sending packet {:?} to connection {}", p, id);
         let res = serialize!(&p);
         if let Err(ref e) = res {

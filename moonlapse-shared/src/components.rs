@@ -1,7 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ConnId;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Player { pub id: u64 }
+pub struct Player { pub id: ConnId }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct EntityDetails { pub name: String, pub description: String }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Position { pub x: i32, pub y: i32 }

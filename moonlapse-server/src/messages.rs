@@ -1,12 +1,12 @@
-use moonlapse_shared::packets::{Packet};
+use moonlapse_shared::{ConnId, packets::Packet};
 
 /// Messages to be sent between the Hub and a Connection
 #[derive(Debug, Clone)]
 pub enum ConnectionMessage {
     /// Signals from Connection to Hub to say "i've disconnected"
-    Disconnected(u64),
+    Disconnected(ConnId),
     /// Signals from Connection that a packet has been received
-    PacketReceived(u64, Packet),
+    PacketReceived(ConnId, Packet),
     /// Signals from Hub to send a packet to the client
     SendPacket(Packet)
 }
@@ -16,9 +16,11 @@ pub enum ConnectionMessage {
 /// Messages to be sent between the Hub and the Game layers.
 /// assists in translation between connection concepts and game concepts
 pub enum HubMessage {
-    PacketFromClient(u64, Packet),
-    ClientDisconnected(u64),
-    ClientConnected(u64),
-    SendTo(u64, Packet),
+    PacketFromClient(ConnId, Packet),
+    // Not necessarily connection closed; just that player logged out
+    PlayerLeft(ConnId),
+    /// Player logged in. (conn_id, username)
+    PlayerJoined(ConnId, String),
+    SendTo(ConnId, Packet),
     Broadcast(Packet)
 }
