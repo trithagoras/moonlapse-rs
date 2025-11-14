@@ -4,7 +4,7 @@ use std::{
 };
 
 use ratatui::{crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, KeyEventKind},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 }, style::Stylize};
@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Poll for input at 30 FPS (33ms)
         if event::poll(Duration::from_millis(33))? {
             match event::read()? {
-                Event::Key(key) => match key.code {
+                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
                     KeyCode::Char('q') if !chat_active => break, // ignore quit while typing
 
                     // panel focus keys (disabled when typing chat)
