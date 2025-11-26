@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::{messages::HubMessage};
 
-pub fn movement_system(world: &mut World, hub_tx: &mpsc::UnboundedSender<HubMessage>) {
+pub fn movement_system(world: &mut World, hub_tx: &mpsc::Sender<HubMessage>) {
     // for all entities with Position + Velocity
     let mut to_broadcast = Vec::new();
     for (entity, (pos, vel)) in world.query_mut::<(&mut Position, &mut Velocity)>() {

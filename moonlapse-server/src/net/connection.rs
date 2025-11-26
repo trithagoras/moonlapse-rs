@@ -1,8 +1,8 @@
 use anyhow::Result;
 use log::{debug, error, info};
-use tokio::{io::{AsyncReadExt, AsyncWriteExt, WriteHalf}, net::TcpStream, sync::{broadcast, mpsc}};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt, WriteHalf}, net::TcpStream};
 
-use crate::{deserialize, messages::ConnectionMessage, serialize};
+use crate::{deserialize, messages::ConnectionMessage, serialize, utils::TxRx};
 use moonlapse_shared::{ConnId, packets::Packet};
 
 /// Object in charge of communication with a single client.
@@ -11,18 +11,13 @@ use moonlapse_shared::{ConnId, packets::Packet};
 /// sending any packets from the outbox back to the client.
 pub struct Connection {
     id: ConnId,
-    /// messages coming directly from the Hub
-    hub_rx: mpsc::UnboundedReceiver<ConnectionMessage>,
-    /// messages to send directly to the Hub
-    hub_tx: mpsc::UnboundedSender<ConnectionMessage>,
-    /// messages from the Hub that were broadcasted
-    broadcast_rx: broadcast::Receiver<ConnectionMessage>,
+    hub_txrx: TxRx<ConnectionMessage>,
     socket: TcpStream,
 }
 
 impl Connection {
-    pub fn new(id: ConnId, hub_rx: mpsc::UnboundedReceiver<ConnectionMessage>, hub_tx: mpsc::UnboundedSender<ConnectionMessage>, broadcast_rx: broadcast::Receiver<ConnectionMessage>, socket: TcpStream) -> Connection {
-        Connection { id, hub_rx, hub_tx, broadcast_rx, socket}
+    pub fn new(id: ConnId, hub_txrx: TxRx<ConnectionMessage>, socket: TcpStream) -> Connection {
+        Connection { id, hub_txrx, socket}
     }
 
     async fn send_packet(writer: &mut WriteHalf<TcpStream>, p: Packet, id: ConnId) {
@@ -30,6 +25,7 @@ impl Connection {
         let res = serialize!(&p);
         if let Err(ref e) = res {
             error!("Error serializing packet {:?} to send to client: {} - {:?}", &p, id, &e);
+            return;
         }
         let data = res.unwrap();
         let res = writer.write(&data).await;
@@ -50,7 +46,7 @@ impl Connection {
         Self::send_packet(&mut writer, Packet::Id(self.id), self.id).await;
 
         // task to read packets from client
-        let hub_tx = self.hub_tx.clone();
+        let hub_tx = self.hub_txrx.0.clone();
         let socket_read = async move {
             let mut buf = vec![0; 1024];
             loop {
@@ -62,7 +58,7 @@ impl Connection {
 
                 match deserialize!(&buf[..n]) {
                     Ok(p) => {
-                        if let Err(e) = hub_tx.send(ConnectionMessage::PacketReceived(id, p)) {
+                        if let Err(e) = hub_tx.send(ConnectionMessage::PacketReceived(id, p)).await {
                             error!("Failed to send PacketReceived for {}: {}", id, e);
                             break;
                         }
@@ -76,22 +72,13 @@ impl Connection {
         // task to read messages from hub
         let hub_read = async move {
             loop {
-                let msg = tokio::select! {
-                    msg = self.hub_rx.recv() => {msg}
-                    msg = self.broadcast_rx.recv() => {
-                        match msg {
-                            Ok(msg) => Some(msg),
-                            _ => None
-                        }
-                    }
-                };
+                let msg = self.hub_txrx.1.recv().await;
                 if let Some(ConnectionMessage::SendPacket(p)) = msg {
                     Self::send_packet(&mut writer, p, id).await;
                 } else {
-                    break;
+                    // TODO: What here??
                 }
             }
-            Ok::<_, anyhow::Error>(())
         };
 
 

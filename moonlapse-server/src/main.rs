@@ -10,6 +10,7 @@ use crate::{game::{Game, GameOptions}, messages::HubMessage, net::hub::{Hub, Hub
 
 mod net;
 mod game;
+mod utils;
 
 // can easily swap out serializers
 #[macro_export]
@@ -42,13 +43,13 @@ async fn main() {
         .filter_level(LevelFilter::Info)
         .init();
 
-    let (hub_to_game_tx, hub_to_game_rx) = mpsc::unbounded_channel::<HubMessage>();
-    let (game_to_hub_tx, game_to_hub_rx) = mpsc::unbounded_channel::<HubMessage>();
+    let (hub_to_game_tx, hub_to_game_rx) = mpsc::channel::<HubMessage>(1024);
+    let (game_to_hub_tx, game_to_hub_rx) = mpsc::channel::<HubMessage>(1024);
 
     // spawn game task
-    let mut game = Game::new(GameOptions{tick_rate: 20}, game_to_hub_tx.clone(), hub_to_game_rx);
+    let mut game = Game::new(GameOptions{tick_rate: 20}, (game_to_hub_tx.clone(), hub_to_game_rx));
     tokio::spawn(async move { game.start().await; });
 
-    let mut hub = Hub::new(HubOptions{ port }, hub_to_game_tx, game_to_hub_rx);
+    let mut hub = Hub::new(HubOptions{ port }, (hub_to_game_tx, game_to_hub_rx));
     hub.start().await;
 }

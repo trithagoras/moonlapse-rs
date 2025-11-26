@@ -2,9 +2,9 @@ use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Result, anyhow};
 use log::{debug, error, info};
-use tokio::{net::TcpListener, sync::{Mutex, broadcast, mpsc}};
+use tokio::{net::TcpListener, sync::{Mutex, mpsc}};
 
-use crate::{messages::{ConnectionMessage, HubMessage}, net::connection::{Connection}};
+use crate::{messages::{ConnectionMessage, HubMessage}, net::connection::Connection, utils::TxRx};
 use moonlapse_shared::{ConnId, packets::Packet};
 
 #[derive(Debug)]
@@ -24,13 +24,13 @@ pub enum ConnectionState {
 
 #[derive(Clone, Copy, Debug)]
 pub struct ConnectionDetails {
-    pub id: ConnId,
+    pub _id: ConnId,
     pub state: ConnectionState
 }
 
 #[derive(Clone, Debug)]
 struct ConnectionWrapper {
-    conn_tx: mpsc::UnboundedSender<ConnectionMessage>,
+    conn_tx: mpsc::Sender<ConnectionMessage>,
     details: ConnectionDetails
 }
 
@@ -40,19 +40,15 @@ pub struct HubOptions {
 
 pub struct Hub {
     opts: HubOptions,
-    hub_tx: mpsc::UnboundedSender<ConnectionMessage>,
-    hub_rx: mpsc::UnboundedReceiver<ConnectionMessage>,
-    game_tx: mpsc::UnboundedSender<HubMessage>,
-    game_rx: mpsc::UnboundedReceiver<HubMessage>,
-    broadcast_tx: broadcast::Sender<ConnectionMessage>,
+    hub_txrx: TxRx<ConnectionMessage>,
+    game_txrx: TxRx<HubMessage>,
     connections: Arc<Mutex<HashMap<ConnId, ConnectionWrapper>>>
 }
 
 impl Hub {
-    pub fn new(opts: HubOptions, game_tx: mpsc::UnboundedSender<HubMessage>, game_rx: mpsc::UnboundedReceiver<HubMessage>) -> Hub {
-        let (hub_tx, hub_rx) = mpsc::unbounded_channel();
-        let (broadcast_tx, _) = broadcast::channel(500);
-        Hub { opts, hub_tx, hub_rx, broadcast_tx, connections: Arc::new(Mutex::new(HashMap::new())), game_tx, game_rx }
+    pub fn new(opts: HubOptions, game_txrx: TxRx<HubMessage>) -> Hub {
+        let hub_txrx = mpsc::channel(1024);
+        Hub { opts, hub_txrx, connections: Arc::new(Mutex::new(HashMap::new())), game_txrx }
     }
 
     async fn get_conn(&self, id: ConnId) -> Result<ConnectionWrapper> {
@@ -68,25 +64,24 @@ impl Hub {
         // fire off listen_loop
         let connections = self.connections.clone();
         let port = self.opts.port;
-        let hub_tx = self.hub_tx.clone();
-        let broadcast_tx = self.broadcast_tx.clone();
-        let game_tx = self.game_tx.clone();
+        let hub_tx = self.hub_txrx.0.clone();
         tokio::spawn(async move {
-            Self::listen_loop(port, connections, hub_tx, broadcast_tx, game_tx).await?;
+            Self::listen_loop(port, connections, hub_tx).await?;
             Ok::<_, anyhow::Error>(())
         });
 
         // event reactive router
+        // i.e. handle_msg
         loop {
             tokio::select! {
-                Some(msg) = self.hub_rx.recv() => {
+                Some(msg) = self.hub_txrx.1.recv() => {
                     match self.handle_connection_message(msg.clone()).await {
                         Err(e) => error!("Error handling incoming message {:?} from a connection: {}",  msg, e),
                         _ => {}
                     }
                 }
 
-                Some(msg) = self.game_rx.recv() => {
+                Some(msg) = self.game_txrx.1.recv() => {
                     match self.handle_game_message(msg.clone()).await {
                         Err(e) => error!("Error handling incoming message {:?} from game: {}",  msg, e),
                         _ => {}
@@ -107,12 +102,12 @@ impl Hub {
                 }
                 p => {
                     // just forward all other packets directly to the game to handle
-                    let _ = self.game_tx.send(HubMessage::PacketFromClient(id, p));
+                    let _ = self.game_txrx.0.send(HubMessage::PacketFromClient(id, p));
                 }
             },
             ConnectionMessage::Disconnected(id) => {
                 // forward to game to clean up. Nothing else required here since other cleanup is handled already.
-                let _ = self.game_tx.send(HubMessage::PlayerLeft(id));
+                let _ = self.game_txrx.0.send(HubMessage::PlayerLeft(id));
                 // broadcast a disconnected packet to all other players
                 self.send_msg(SendTo::All, ConnectionMessage::SendPacket(Packet::PlayerDisconnected(id))).await?;
             }
@@ -124,7 +119,7 @@ impl Hub {
     async fn handle_connection_entry_message(&self, msg: ConnectionMessage) -> Result<()> {
         match msg {
             ConnectionMessage::PacketReceived(id, packet) => match packet {
-                Packet::Register(username, password) => {
+                Packet::Register(_username, _password) => {
 
                 }
                 Packet::Login(username, password) => {
@@ -139,12 +134,12 @@ impl Hub {
                                 }
                             }
                             // send message to game to init entity, etc.
-                            _ = self.game_tx.send(HubMessage::PlayerJoined(id, username));
+                            _ = self.game_txrx.0.send(HubMessage::PlayerJoined(id, username));
                         } else {
-                            self.send_msg_to(id, ConnectionMessage::SendPacket(Packet::Deny("Incorrect password".into()))).await?;
+                            self.send_msg(SendTo::Id(id), ConnectionMessage::SendPacket(Packet::Deny("Incorrect password".into()))).await?;
                         }
                     } else {
-                        self.send_msg_to(id, ConnectionMessage::SendPacket(Packet::Deny("User does not exist".into()))).await?;
+                        self.send_msg(SendTo::Id(id), ConnectionMessage::SendPacket(Packet::Deny("User does not exist".into()))).await?;
                     }
                 }
                 _ => {}
@@ -194,7 +189,7 @@ impl Hub {
     }
 
     /// Listens for new connections and dispatches them
-    async fn listen_loop(port: u16, connections: Arc<Mutex<HashMap<ConnId, ConnectionWrapper>>>, hub_tx: mpsc::UnboundedSender<ConnectionMessage>, broadcast_tx: broadcast::Sender<ConnectionMessage>, game_tx: mpsc::UnboundedSender<HubMessage>) -> Result<()> {
+    async fn listen_loop(port: u16, connections: Arc<Mutex<HashMap<ConnId, ConnectionWrapper>>>, hub_tx: mpsc::Sender<ConnectionMessage>) -> Result<()> {
         let listener = TcpListener::bind(("0.0.0.0", port)).await?;
         let port = listener.local_addr()?.port();
         
@@ -213,10 +208,10 @@ impl Hub {
 
             // create new connection object, assign ID, spawn off task
             // connection channels
-            let (conn_tx, conn_rx) = mpsc::unbounded_channel();
+            let (conn_tx, conn_rx) = mpsc::channel(1024);
             {
                 let mut lock = connections.lock().await;
-                lock.insert(conn_id, ConnectionWrapper { details: ConnectionDetails { id: conn_id, state: ConnectionState::Entry }, conn_tx });
+                lock.insert(conn_id, ConnectionWrapper { details: ConnectionDetails { _id: conn_id, state: ConnectionState::Entry }, conn_tx });
             }
 
             // send connection message to game
@@ -224,14 +219,13 @@ impl Hub {
 
             let conns = connections.clone();
             let hub_tx = hub_tx.clone();
-            let broadcast_rx = broadcast_tx.subscribe();
-            let conn = Connection::new(conn_id, conn_rx, hub_tx.clone(), broadcast_rx, stream);
+            let conn = Connection::new(conn_id, (hub_tx.clone(), conn_rx), stream);
             tokio::spawn(async move {
                 conn.start().await?;
                 
                 // connection finished
                 // send to hub so it can broadcast the message to others
-                hub_tx.send(ConnectionMessage::Disconnected(conn_id))?;
+                hub_tx.send(ConnectionMessage::Disconnected(conn_id)).await?;
 
                 // cleanup
                 let mut lock = conns.lock().await;
@@ -243,46 +237,36 @@ impl Hub {
         }
     }
 
-    async fn send_msg_to(&self, id: ConnId, msg: ConnectionMessage) -> Result<()> {
-        let conn = self.get_conn(id).await?;
-        conn.conn_tx.send(msg)?;
-        Ok(())
-    }
-
     async fn send_msg(&self, to: SendTo, msg: ConnectionMessage) -> Result<()> {
-        match to {
-            SendTo::Id(id) => self.send_msg_to(id, msg.clone()).await,
-            SendTo::Matches(pred) => {
-                // TODO: get parallel shit to work
-                // as this is being processed in sequence
-
-                let conns: Vec<_> = {
-                    let lock = self.connections.lock().await;
-                    lock.values().filter(|x| pred(x.details)).cloned().collect()
-                };
-
-                for conn in conns {
-                    if pred(conn.details) {
-                        self.send_msg_to(conn.details.id, msg.clone()).await?;
+        // collect the senders we need to avoid holding the lock while sending/awaiting
+        let targets: Vec<mpsc::Sender<ConnectionMessage>> = {
+            let lock = self.connections.lock().await;
+            
+            match to {
+                SendTo::Id(id) => {
+                    if let Some(wrapper) = lock.get(&id) {
+                        vec![wrapper.conn_tx.clone()]
+                    } else {
+                        vec![]
                     }
+                },
+                SendTo::All => {
+                    lock.values().map(|c| c.conn_tx.clone()).collect()
+                },
+                SendTo::Matches(pred) => {
+                    lock.values()
+                        .filter(|c| pred(c.details))
+                        .map(|c| c.conn_tx.clone())
+                        .collect()
                 }
-
-                Ok(())
-                
-                // let mut set = JoinSet::new();
-                // conns
-                //     .iter()
-                //     .map(|x| self.send_msg_to(x.details.id, msg.clone()))
-                //     .for_each(|task| {
-                //         set.spawn(task);
-                //     });
-
-                // set.join_all().await;
-            },
-            SendTo::All => {
-                self.broadcast_tx.send(msg.clone())?;
-                Ok(())
             }
+        };
+
+        for tx in targets {
+            // ignore errors (e.g. if client disconnected but map not updated yet)
+            let _ = tx.send(msg.clone()); 
         }
+
+        Ok(())
     }
 }

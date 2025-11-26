@@ -5,9 +5,9 @@ use std::{collections::HashMap, time::Duration};
 use hecs::{Entity, World};
 use log::{warn};
 use moonlapse_shared::{ConnId, WorldSnapshot, components::{EntityDetails, Player, Position, Velocity}, packets::{Component, Packet}};
-use tokio::{sync::mpsc, time};
+use tokio::time;
 
-use crate::{game::systems::{movement_system, set_entity_velocity}, messages::HubMessage};
+use crate::{game::systems::{movement_system, set_entity_velocity}, messages::HubMessage, utils::TxRx};
 
 pub struct GameOptions {
     pub tick_rate: u8
@@ -15,16 +15,15 @@ pub struct GameOptions {
 
 pub struct Game {
     opts: GameOptions,
-    hub_tx: mpsc::UnboundedSender<HubMessage>,
-    hub_rx: mpsc::UnboundedReceiver<HubMessage>,
+    hub_txrx: TxRx<HubMessage>,
     world: World,
     /// Mapping of player connection_id -> in-game Entity
     conn_entity_map: HashMap<ConnId, Entity>
 }
 
 impl Game {
-    pub fn new(opts: GameOptions, hub_tx: mpsc::UnboundedSender<HubMessage>, hub_rx: mpsc::UnboundedReceiver<HubMessage>) -> Game {
-        Game{opts, hub_tx, hub_rx, world: World::new(), conn_entity_map: HashMap::new()}
+    pub fn new(opts: GameOptions, hub_txrx: TxRx<HubMessage>) -> Game {
+        Game{opts, hub_txrx, world: World::new(), conn_entity_map: HashMap::new()}
     }
 
     pub async fn start(&mut self) {
@@ -52,7 +51,7 @@ impl Game {
 
     fn tick(&mut self, _ticks: &u64) {
         // dispatch all incoming messages from hub
-        while let Ok(msg) = self.hub_rx.try_recv() {
+        while let Ok(msg) = self.hub_txrx.1.try_recv() {
             self.dispatch_hub_message(msg);
         }
 
@@ -60,7 +59,7 @@ impl Game {
     }
 
     fn run_systems(&mut self) {
-        movement_system(&mut self.world, &self.hub_tx);
+        movement_system(&mut self.world, &self.hub_txrx.0);
     }
 
     fn dispatch_hub_message(&mut self, msg: HubMessage) {
@@ -90,15 +89,15 @@ impl Game {
 
                 // send a current world snapshot to the new connection
                 let snapshot = Self::create_world_snapshot(&self.world);
-                let _ = self.hub_tx.send(HubMessage::SendTo(conn_id, Packet::WorldSnapshot(snapshot)));
+                let _ = self.hub_txrx.0.send(HubMessage::SendTo(conn_id, Packet::WorldSnapshot(snapshot)));
                 
                 // broadcast our new connection to everyone else
                 // TODO: make this nicer!
                 // e.g. ComponentUpdate((c1, c2, ...))
-                let _ = self.hub_tx.send(HubMessage::Broadcast(
+                let _ = self.hub_txrx.0.send(HubMessage::Broadcast(
                     Packet::ComponentUpdate(entity.id(), Component::Position(Position{x: 0, y: 0}))
                 ));
-                let _ = self.hub_tx.send(HubMessage::Broadcast(
+                let _ = self.hub_txrx.0.send(HubMessage::Broadcast(
                     Packet::ComponentUpdate(entity.id(), Component::Player(Player{id: conn_id}))
                 ));
 
