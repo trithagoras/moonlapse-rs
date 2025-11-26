@@ -1,5 +1,3 @@
-pub mod systems;
-
 use std::{collections::HashMap, time::Duration};
 
 use hecs::{Entity, World};
@@ -7,7 +5,7 @@ use log::{warn};
 use moonlapse_shared::{ConnId, WorldSnapshot, components::{EntityDetails, Player, Position, Velocity}, packets::{Component, Packet}};
 use tokio::time;
 
-use crate::{game::systems::{movement_system, set_entity_velocity}, messages::HubMessage, utils::TxRx};
+use crate::{core::systems::{movement_system, set_entity_velocity}, messages::HubMessage, utils::TxRx};
 
 pub struct GameOptions {
     pub tick_rate: u8
@@ -50,9 +48,9 @@ impl Game {
     }
 
     fn tick(&mut self, _ticks: &u64) {
-        // dispatch all incoming messages from hub
+        // handle all incoming messages from hub
         while let Ok(msg) = self.hub_txrx.1.try_recv() {
-            self.dispatch_hub_message(msg);
+            self.handle_hub_message(msg);
         }
 
         self.run_systems();
@@ -62,7 +60,7 @@ impl Game {
         movement_system(&mut self.world, &self.hub_txrx.0);
     }
 
-    fn dispatch_hub_message(&mut self, msg: HubMessage) {
+    fn handle_hub_message(&mut self, msg: HubMessage) {
         match msg {
             HubMessage::PacketFromClient(conn_id, packet) => {
                 match packet {

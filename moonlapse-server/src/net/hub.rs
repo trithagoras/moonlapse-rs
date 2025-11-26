@@ -7,7 +7,6 @@ use tokio::{net::TcpListener, sync::{Mutex, mpsc}};
 use crate::{messages::{ConnectionMessage, HubMessage}, net::connection::Connection, utils::TxRx};
 use moonlapse_shared::{ConnId, packets::Packet};
 
-#[derive(Debug)]
 enum SendTo {
     Id(ConnId),
     All,

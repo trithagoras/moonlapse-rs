@@ -24,3 +24,10 @@ pub enum HubMessage {
     SendTo(ConnId, Packet),
     Broadcast(Packet)
 }
+
+#[derive(Debug, Clone)]
+/// Messages to be sent between the Hub and the Game layers.
+/// assists in translation between connection concepts and game concepts
+pub enum GameMessage {
+    
+}

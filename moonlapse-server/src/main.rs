@@ -6,10 +6,10 @@ use tokio::sync::mpsc;
 
 mod messages;
 
-use crate::{game::{Game, GameOptions}, messages::HubMessage, net::hub::{Hub, HubOptions}};
+use crate::{core::game::{Game, GameOptions}, messages::HubMessage, net::hub::{Hub, HubOptions}};
 
 mod net;
-mod game;
+mod core;
 mod utils;
 
 // can easily swap out serializers
