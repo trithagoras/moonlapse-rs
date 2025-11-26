@@ -3,9 +3,9 @@ use std::{collections::HashMap, time::Duration};
 use hecs::{Entity, World};
 use log::{warn};
 use moonlapse_shared::{ConnId, WorldSnapshot, components::{EntityDetails, Player, Position, Velocity}, packets::{Component, Packet}};
-use tokio::time;
+use tokio::{sync::mpsc, time};
 
-use crate::{core::systems::{movement_system, set_entity_velocity}, messages::HubMessage, utils::TxRx};
+use crate::{core::systems::{movement_system, set_entity_velocity}, messages::{GameMessage, HubMessage}, utils::TxRx};
 
 pub struct GameOptions {
     pub tick_rate: u8
@@ -14,6 +14,7 @@ pub struct GameOptions {
 pub struct Game {
     opts: GameOptions,
     hub_txrx: TxRx<HubMessage>,
+    game_txrx: TxRx<GameMessage>,
     world: World,
     /// Mapping of player connection_id -> in-game Entity
     conn_entity_map: HashMap<ConnId, Entity>
@@ -21,7 +22,8 @@ pub struct Game {
 
 impl Game {
     pub fn new(opts: GameOptions, hub_txrx: TxRx<HubMessage>) -> Game {
-        Game{opts, hub_txrx, world: World::new(), conn_entity_map: HashMap::new()}
+        let game_txrx = mpsc::channel(1024);
+        Game{opts, hub_txrx, game_txrx, world: World::new(), conn_entity_map: HashMap::new()}
     }
 
     pub async fn start(&mut self) {
@@ -53,11 +55,26 @@ impl Game {
             self.handle_hub_message(msg);
         }
 
+        // then handle all incoming messages from within game layer
+        while let Ok(msg) = self.game_txrx.1.try_recv() {
+            self.handle_game_message(msg);
+        }
+
         self.run_systems();
     }
 
     fn run_systems(&mut self) {
-        movement_system(&mut self.world, &self.hub_txrx.0);
+        movement_system(&mut self.world, &self.game_txrx.0);
+    }
+
+    fn handle_game_message(&mut self, msg: GameMessage) {
+        match msg {
+            GameMessage::ComponentUpdate(eid, comp) => {
+                // TODO: only need to broadcast this to connections who are nearby this entity
+                // would this be done here or in Hub?
+                _ = self.hub_txrx.0.blocking_send(HubMessage::Broadcast(Packet::ComponentUpdate(eid, comp)));
+            }
+        }
     }
 
     fn handle_hub_message(&mut self, msg: HubMessage) {
@@ -81,9 +98,6 @@ impl Game {
                 let bundle = (Player{id: conn_id}, Velocity{dx: 0, dy: 0}, Position{x: 0, y: 0}, EntityDetails{name: username, description: "Another moonlapser".into()});
                 let entity = self.world.spawn(bundle);
                 self.conn_entity_map.insert(conn_id, entity);
-
-                // TODO: broadcasts and regular sends are sent in indeterminable order due to select! in Connection
-                // that's probably bad....
 
                 // send a current world snapshot to the new connection
                 let snapshot = Self::create_world_snapshot(&self.world);

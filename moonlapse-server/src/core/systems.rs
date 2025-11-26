@@ -1,11 +1,11 @@
 use hecs::{Entity, World};
 use log::{warn};
-use moonlapse_shared::{components::*, packets::{Component, Direction, Packet}};
+use moonlapse_shared::{components::*, packets::{Component, Direction}};
 use tokio::sync::mpsc;
 
-use crate::{messages::HubMessage};
+use crate::messages::GameMessage;
 
-pub fn movement_system(world: &mut World, hub_tx: &mpsc::Sender<HubMessage>) {
+pub fn movement_system(world: &mut World, game_tx: &mpsc::Sender<GameMessage>) {
     // for all entities with Position + Velocity
     let mut to_broadcast = Vec::new();
     for (entity, (pos, vel)) in world.query_mut::<(&mut Position, &mut Velocity)>() {
@@ -28,9 +28,7 @@ pub fn movement_system(world: &mut World, hub_tx: &mpsc::Sender<HubMessage>) {
 
     // broadcast all updated positions
     for (eid, pos) in to_broadcast {
-        let _ = hub_tx.send(HubMessage::Broadcast(
-            Packet::ComponentUpdate(eid, Component::Position(pos)),
-        ));
+        let _ = game_tx.blocking_send(GameMessage::ComponentUpdate(eid, Component::Position(pos)));
     }
 }
 

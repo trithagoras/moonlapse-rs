@@ -1,4 +1,4 @@
-use moonlapse_shared::{ConnId, packets::Packet};
+use moonlapse_shared::{ConnId, EntityId, packets::{Component, Packet}};
 
 /// Messages to be sent between the Hub and a Connection
 #[derive(Debug, Clone)]
@@ -26,8 +26,8 @@ pub enum HubMessage {
 }
 
 #[derive(Debug, Clone)]
-/// Messages to be sent between the Hub and the Game layers.
-/// assists in translation between connection concepts and game concepts
+/// Messages to be sent within the Game layer
+/// e.g. from System to System
 pub enum GameMessage {
-    
+    ComponentUpdate(EntityId, Component)
 }
